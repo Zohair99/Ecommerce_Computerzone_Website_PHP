@@ -1,0 +1,373 @@
+<?php
+session_start();
+
+$conn = mysqli_connect("localhost", "root", "", "computerzone");
+
+if (!$conn) {
+    die("Connection failed: " . mysqli_connect_error());
+}
+
+$searchQuery = isset($_GET['search']) ? trim(mysqli_real_escape_string($conn, $_GET['search'])) : '';
+$highlightId = isset($_GET['highlight']) ? (int)$_GET['highlight'] : 0;
+
+function getRedirectUrl($baseUrl, $currentParams, $searchQuery = '') {
+    $params = [];
+    if (!empty($searchQuery)) {
+        $params['search'] = $searchQuery;
+    }
+    if (!empty($currentParams['gpu'])) {
+        $params['gpu'] = $currentParams['gpu'];
+    }
+    if (!empty($currentParams['chip'])) {
+        $params['chip'] = $currentParams['chip'];
+    }
+    if (!empty($currentParams['sort'])) {
+        $params['sort'] = $currentParams['sort'];
+    }
+    if (!empty($currentParams['page'])) {
+        $params['page'] = $currentParams['page'];
+    }
+    return $baseUrl . (!empty($params) ? '?' . http_build_query($params) : '');
+}
+
+if (isset($_GET['logout'])) {
+    session_destroy();
+    header("Location: index.php");
+    exit();
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $currentFileName = basename($_SERVER['PHP_SELF']);
+
+    if (isset($_POST['increase_quantity']) || isset($_POST['quantity'])) {
+        $itemIndex = (int)$_POST['item_index'];
+        $newQuantity = (int)$_POST['quantity'];
+        if ($newQuantity > 0 && isset($_SESSION['cart'][$itemIndex])) {
+            $_SESSION['cart'][$itemIndex]['quantity'] = $newQuantity;
+        }
+        header("Location: " . getRedirectUrl($currentFileName, $_GET, $searchQuery));
+        exit();
+    }
+
+    if (isset($_POST['remove_item'])) {
+        $itemIndex = (int)$_POST['item_index'];
+        if (isset($_SESSION['cart'][$itemIndex])) {
+            unset($_SESSION['cart'][$itemIndex]);
+            $_SESSION['cart'] = array_values($_SESSION['cart']);
+        }
+        header("Location: " . getRedirectUrl($currentFileName, $_GET, $searchQuery));
+        exit();
+    }
+}
+
+$title = 'Graphic Card Prices in Pakistan | Geforce - Radeon';
+include_once('navbar/productstyle.php');
+
+$products_per_page = 10;
+$current_page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
+$offset = ($current_page - 1) * $products_per_page;
+
+$sort_order = "gpu.price ASC";
+if (isset($_GET['sort'])) {
+    switch ($_GET['sort']) {
+        case "high":
+            $sort_order = "gpu.price DESC";
+            break;
+        case "low":
+            $sort_order = "gpu.price ASC";
+            break;
+        case "rating":
+            $sort_order = "gpu.review DESC";
+            break;
+        default:
+            $sort_order = "gpu.price ASC";
+    }
+}
+
+$selected_gpu_name = isset($_GET['gpu']) ? mysqli_real_escape_string($conn, $_GET['gpu']) : '';
+$selected_chip_set = isset($_GET['chip']) ? mysqli_real_escape_string($conn, $_GET['chip']) : '';
+
+$base_product_query = "SELECT gpu.*, graphic_card.gpu_name AS gpu_brand_name, chipset.chip_set AS chipset_name
+                       FROM gpu
+                       INNER JOIN graphic_card ON gpu.gpu_name = graphic_card.gpu_name
+                       INNER JOIN chipset ON gpu.chip_set = chipset.chip_set";
+
+$base_count_query = "SELECT COUNT(*) as total
+                     FROM gpu
+                     INNER JOIN graphic_card ON gpu.gpu_name = graphic_card.gpu_name
+                     INNER JOIN chipset ON gpu.chip_set = chipset.chip_set";
+
+$conditions = [];
+if (!empty($selected_gpu_name)) {
+    $conditions[] = "graphic_card.gpu_name = '" . $selected_gpu_name . "'";
+}
+if (!empty($selected_chip_set)) {
+    $conditions[] = "chipset.chip_set = '" . $selected_chip_set . "'";
+}
+if (!empty($searchQuery)) {
+    $conditions[] = "gpu.name LIKE '%" . $searchQuery . "%'";
+}
+
+$where_clause = empty($conditions) ? "" : " WHERE " . implode(" AND ", $conditions);
+
+$total_products_query = $base_count_query . $where_clause;
+$total_products_result = mysqli_query($conn, $total_products_query);
+if (!$total_products_result) {
+    die("Error fetching total products: " . mysqli_error($conn));
+}
+$total_products = mysqli_fetch_assoc($total_products_result)['total'];
+$total_pages = ceil($total_products / $products_per_page);
+
+$product_query = $base_product_query . $where_clause . " ORDER BY " . $sort_order . " LIMIT " . $offset . ", " . $products_per_page;
+$product_result = mysqli_query($conn, $product_query);
+if (!$product_result) {
+    die("Error fetching products: " . mysqli_error($conn));
+}
+$num_rows = mysqli_num_rows($product_result);
+?>
+
+<!-- breadcrumb -->
+
+<nav class="breadcrumb">
+    <ul>
+        <li><a href="index.php">Home</a></li>
+        <li>/</li>
+        <li><a href="gpu.php" class="active">GPU</a></li>
+    </ul>
+</nav>
+
+<!-- Main Container with Sidebar and Content -->
+<div class="ppcontainer">
+    <!-- Left Sidebar -->
+    <aside class="sidebar">
+        <!-- Graphic Cards Filter -->
+        <div class="filter-category">
+            <button class="filter-toggle"><i class="fa-solid fa-caret-down"></i> Graphic Cards</button>
+            <ul class="filter-list" style="display: none;">
+                <?php
+                $graphic_query = "SELECT DISTINCT gpu_name FROM graphic_card ORDER BY gpu_name ASC";
+                $graphic_result = mysqli_query($conn, $graphic_query);
+
+                if (!$graphic_result) {
+                    echo "<li>Error fetching options: " . htmlspecialchars(mysqli_error($conn)) . "</li>";
+                } else {
+                    while ($row = mysqli_fetch_assoc($graphic_result)) {
+                        $original_value = $row['gpu_name'];
+                        $display_value = htmlspecialchars($original_value, ENT_QUOTES);
+                        $url_value = urlencode($original_value);
+                        $is_active = (isset($_GET['gpu']) && urldecode($_GET['gpu']) === $original_value) ? 'active' : '';
+                        echo "<li class='$is_active'><a href='?gpu=$url_value'>$display_value</a></li>";
+                    }
+                }
+                ?>
+            </ul>
+        </div>
+
+        <!-- Chipset Filter -->
+        <div class="filter-category">
+            <button class="filter-toggle"><i class="fa-solid fa-caret-down"></i> Chipset</button>
+            <ul class="filter-list" style="display: none;">
+                <?php
+                $chip_query = "SELECT DISTINCT chip_set FROM chipset ORDER BY chip_set ASC";
+                $chip_result = mysqli_query($conn, $chip_query);
+
+                if (!$chip_result) {
+                    echo "<li>Error fetching chipset options: " . htmlspecialchars(mysqli_error($conn)) . "</li>";
+                } else {
+                    while ($row = mysqli_fetch_assoc($chip_result)) {
+                        $original_value = $row['chip_set'];
+                        $display_value = htmlspecialchars($original_value, ENT_QUOTES);
+                        $url_value = urlencode($original_value);
+                        $is_active = (isset($_GET['chip']) && urldecode($_GET['chip']) === $original_value) ? 'active' : '';
+                        echo "<li class='$is_active'><a href='?chip=$url_value'>$display_value</a></li>";
+                    }
+                }
+                ?>
+            </ul>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <div class="main-content">
+        <div class="product-grid">
+            <div class="mainheading">
+                <h3 id="gpu-heading">GPU<?php echo $selected_gpu_name ? " >> " . htmlspecialchars($selected_gpu_name) : ''; ?></h3>
+            </div>
+            <div class="pp">
+                <p>Shop a wide selection of GPUs in Pakistan including various models at Czone.com.pk</p>
+            </div>
+
+            <!-- Top Pagination -->
+            <div class="pagination-container">
+                <div class="results-info">
+                    Showing <strong><?php echo ($offset + 1); ?> - <?php echo min($offset + $products_per_page, $total_products); ?></strong> of
+                    <strong><?php echo $total_products; ?></strong> Results
+                </div>
+                <div class="pagination">
+                    <button class="page-btn" <?php echo ($current_page > 1) ? "onclick=\"window.location='?page=1'\"" : "disabled"; ?>>&laquo;&laquo;</button>
+                    <button class="page-btn" <?php echo ($current_page > 1) ? "onclick=\"window.location='?page=" . ($current_page - 1) . "'\"" : "disabled"; ?>>&laquo;</button>
+                    <?php for ($page = 1; $page <= $total_pages; $page++): ?>
+                        <button class="page-btn <?php echo ($page == $current_page) ? 'active' : ''; ?>" onclick="window.location='?page=<?php echo $page; ?>'">
+                            <?php echo $page; ?>
+                        </button>
+                    <?php endfor; ?>
+                    <button class="page-btn" <?php echo ($current_page < $total_pages) ? "onclick=\"window.location='?page=" . ($current_page + 1) . "'\"" : "disabled"; ?>>&raquo;</button>
+                    <button class="page-btn" <?php echo ($current_page < $total_pages) ? "onclick=\"window.location='?page=$total_pages'\"" : "disabled"; ?>>&raquo;&raquo;</button>
+                </div>
+                <div class="dropoff">
+                    <div class="dropdowns">
+                        <label for="resultsPerPage">Results Per Page:</label>
+                        <select id="resultsPerPage">
+                            <option selected>10</option>
+                            <option>20</option>
+                            <option>50</option>
+                        </select>
+                    </div>
+                    <div class="dropdownss">
+                        <select id="sortOrder">
+                            <option value="low" <?php if (isset($_GET['sort']) && $_GET['sort'] == "low") echo "selected"; ?>>Price Low - High</option>
+                            <option value="high" <?php if (isset($_GET['sort']) && $_GET['sort'] == "high") echo "selected"; ?>>Price High - Low</option>
+                            <option value="rating" <?php if (isset($_GET['sort']) && $_GET['sort'] == "rating") echo "selected"; ?>>Best Rating</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product Cards -->
+            <?php while ($row = mysqli_fetch_assoc($product_result)): {
+                    $gpu_name = isset($row['gpu_name']) ? htmlspecialchars($row['gpu_name']) : 'N/A';
+                    $chip_set = isset($row['chip_set']) ? htmlspecialchars($row['chip_set']) : 'N/A';
+                } ?>
+                <div class="product-container card" data-category="gpu" data-id="<?php echo htmlspecialchars($row['id']); ?>">
+                    <?php if (!empty($row['offer'])): ?>
+                        <div class="discount-badge"><?php echo htmlspecialchars($row['offer']); ?>% OFF</div>
+                    <?php endif; ?>
+                    <img src="Admin/images/<?php echo htmlspecialchars($row['image']); ?>" alt="<?php echo htmlspecialchars($row['name']); ?>" class="product-image">
+                    <div class="product-details">
+                        <h2 class="product-title"><?php echo htmlspecialchars($row['name']); ?></h2>
+                        <p class="rating">
+                            <?php
+                            $review_stars = intval($row['review']);
+                            echo str_repeat("⭐", $review_stars);
+                            ?>
+                            (<?php echo $review_stars; ?> Stars)
+                        </p>
+                        <p class="category"><strong>Category:</strong> GPU > <?php echo $gpu_name; ?></p>
+                        <p class="code"><strong>Code: </strong> <?php echo htmlspecialchars($row['codee']); ?></p>
+                        <p class="description"><?php echo htmlspecialchars($row['description']); ?></p>
+                        <?php if (!empty($row['spec1']) || !empty($row['spec2']) || !empty($row['spec3']) || !empty($row['spec4'])): ?>
+                            <ul class="features">
+                                <?php if (!empty($row['spec1'])): ?><li><?php echo htmlspecialchars($row['spec1']); ?></li><?php endif; ?>
+                                <?php if (!empty($row['spec2'])): ?><li><?php echo htmlspecialchars($row['spec2']); ?></li><?php endif; ?>
+                                <?php if (!empty($row['spec3'])): ?><li><?php echo htmlspecialchars($row['spec3']); ?></li><?php endif; ?>
+                                <?php if (!empty($row['spec4'])): ?><li><?php echo htmlspecialchars($row['spec4']); ?></li><?php endif; ?>
+                            </ul>
+                        <?php endif; ?>
+                    </div>
+                    <div class="product-right">
+                        <p class="availability"><strong>Availability:</strong> <span class="in-stock">In Stock</span></p>
+                        <p class="price">Rs. <?php echo number_format($row['price']); ?></p>
+                        <?php if (!empty($row['old_price'])): ?>
+                            <span class="old-price">Rs. <?php echo number_format($row['old_price']); ?></span>
+                        <?php endif; ?>
+                        <button class="add-to-cart" onclick="addToCart(<?php echo htmlspecialchars($row['id']); ?>, 'gpu')">
+                            <i class="fa-solid fa-cart-shopping"></i> Add To Cart
+                        </button>
+                        <button class="add-to-wishlist">
+                            <i class="fa-solid fa-heart"></i> Add To Wishlist
+                        </button>
+                    </div>
+                </div>
+            <?php endwhile; ?>
+
+            <!-- Bottom Pagination -->
+            <div class="pagination-containers">
+                <div class="results-info">
+                    Showing <strong><?php echo ($offset + 1); ?> - <?php echo min($offset + $products_per_page, $total_products); ?></strong> of
+                    <strong><?php echo $total_products; ?></strong> Results
+                </div>
+                <div class="pagination">
+                    <button class="page-btn" <?php echo ($current_page > 1) ? "onclick=\"window.location='?page=1'\"" : "disabled"; ?>>&laquo;&laquo;</button>
+                    <button class="page-btn" <?php echo ($current_page > 1) ? "onclick=\"window.location='?page=" . ($current_page - 1) . "'\"" : "disabled"; ?>>&laquo;</button>
+                    <?php for ($page = 1; $page <= $total_pages; $page++): ?>
+                        <button class="page-btn <?php echo ($page == $current_page) ? 'active' : ''; ?>" onclick="window.location='?page=<?php echo $page; ?>'">
+                            <?php echo $page; ?>
+                        </button>
+                    <?php endfor; ?>
+                    <button class="page-btn" <?php echo ($current_page < $total_pages) ? "onclick=\"window.location='?page=" . ($current_page + 1) . "'\"" : "disabled"; ?>>&raquo;</button>
+                    <button class="page-btn" <?php echo ($current_page < $total_pages) ? "onclick=\"window.location='?page=$total_pages'\"" : "disabled"; ?>>&raquo;&raquo;</button>
+                </div>
+                <div class="dropoff">
+                    <div class="dropdowns">
+                        <label for="resultsPerPage">Results Per Page:</label>
+                        <select id="resultsPerPage">
+                            <option selected>10</option>
+                            <option>20</option>
+                            <option>50</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- End Paragraph -->
+        <div class="endpara">
+            <p>Whether you're a gamer, content creator, or data analyst, a powerful GPU is essential for delivering smooth performance and stunning visuals. From rendering high-resolution videos to playing the latest AAA games or accelerating complex computations, a dedicated graphics card transforms your experience.</p>
+            <p>We offer a wide range of GPUs from top brands like NVIDIA and AMD at the best prices in Pakistan — perfect for building or upgrading your PC with the performance you need.</p>
+            <p>Upgrade your graphics, upgrade your game — power up with the right GPU today!</p>
+        </div>
+    </div>
+</div>
+
+<!-- Product Popup -->
+<div id="productPopup" class="popup" data-category="gpu">
+    <div class="popup-content">
+        <span class="close-popup" id="closePopup">&times;</span>
+        <img id="popupImage" src="" alt="">
+        <div class="popup-text">
+            <h2 id="popupTitle"></h2>
+            <div class="reviews">
+                <p id="popupReview" class="para"></p>
+                <p id="popupCategory" class="para"><strong>Category:</strong></p>
+                <p id="popupCode" class="para"><strong>Code:</strong></p>
+                <p id="popupDescription" class="para"></p>
+            </div>
+            <ul id="popupFeatures">
+                <li></li>
+                <li></li>
+                <li></li>
+                <li></li>
+            </ul>
+            <div class="links">
+                <a href="#"><img src="images/facebook.jpeg" alt=""></a>
+                <a href="#"><img src="images/google plus.jpeg" alt=""></a>
+            </div>
+        </div>
+        <div class="aside">
+            <span class="in-stock">In Stock</span>
+            <p class="warranty">Warranty:<strong> International warranty</strong></p>
+            <button class="add-to-cart" onclick="addToCart(0, 'gpu')">
+                <i class="fa-solid fa-cart-shopping"></i> Add To Cart
+            </button>
+            <button class="add-to-wishlist">Add To Wishlist</button>
+            <div class="prices">
+                <p id="pop-prices"></p>
+                <p id="pop-old-prices"></p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Start All Products  -->
+
+<!-- End All Products  -->
+
+    <?php
+    include_once('footer/footer.php');
+    ?>
+
+</body>
+
+</html>
+
+<script src="javascript/products.js"></script>
