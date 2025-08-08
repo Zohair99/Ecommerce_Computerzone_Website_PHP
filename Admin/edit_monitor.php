@@ -1,0 +1,171 @@
+<?php
+$conn = mysqli_connect("localhost", "root", "", "computerzone");
+
+if (!$conn) {
+    die("Database Connection Failed: " . mysqli_connect_error());
+}
+
+// Fetch dropdown options
+$monitor_result = mysqli_query($conn, "SELECT * FROM lcdmonitor");
+$size_result = mysqli_query($conn, "SELECT * FROM inches");
+
+// Handle update
+if (isset($_POST['update_product']) && isset($_POST['update_id'])) {
+    $update_id = intval($_POST['update_id']);
+    $offer = mysqli_real_escape_string($conn, $_POST['offer']);
+    $name = mysqli_real_escape_string($conn, $_POST['name']);
+    $description = mysqli_real_escape_string($conn, $_POST['description']);
+    $monitor = mysqli_real_escape_string($conn, $_POST['monitor_dropdown']);
+    $size = mysqli_real_escape_string($conn, $_POST['size_dropdown']);
+    $review = intval($_POST['rating']);
+    $code = mysqli_real_escape_string($conn, $_POST['code']);
+    $spec1 = mysqli_real_escape_string($conn, $_POST['spec1']);
+    $spec2 = mysqli_real_escape_string($conn, $_POST['spec2']);
+    $spec3 = mysqli_real_escape_string($conn, $_POST['spec3']);
+    $spec4 = mysqli_real_escape_string($conn, $_POST['spec4']);
+    $price = floatval($_POST['price']);
+    $old_price = floatval($_POST['old_price']);
+
+    // Image handling
+    if (!empty($_FILES['image']['name'])) {
+        $temp = $_FILES['image']['tmp_name'];
+        $file_name = $_FILES['image']['name'];
+        $final = 'images/' . $file_name;
+        if (!is_dir('images')) mkdir('images', 0777, true);
+        move_uploaded_file($temp, $final);
+    } else {
+        $file_name = $_POST['existing_image'];
+    }
+
+    // Check if monitor and size exist (foreign key safe)
+    $monitor_check = mysqli_query($conn, "SELECT monitor FROM lcdmonitor WHERE monitor = '$monitor'");
+    $size_check = mysqli_query($conn, "SELECT size FROM inches WHERE size = '$size'");
+
+    if (mysqli_num_rows($monitor_check) === 0 || mysqli_num_rows($size_check) === 0) {
+        die("<p style='color:red;'>Invalid monitor or size selected. Ensure both exist in the reference tables.</p>");
+    }
+
+    $update_query = "UPDATE monitor SET 
+                    offer='$offer',
+                    name='$name',
+                    review='$review',
+                    code='$code',
+                    description='$description',
+                    image='$file_name',
+                    lcdmonitor='$monitor',
+                    inches='$size',
+                    spec1='$spec1',
+                    spec2='$spec2',
+                    spec3='$spec3',
+                    spec4='$spec4',
+                    price='$price',
+                    old_price='$old_price'
+                    WHERE id='$update_id'";
+
+    if (mysqli_query($conn, $update_query)) {
+        echo "<script>alert('Product updated successfully.'); window.location.href='view_monitor.php';</script>";
+    } else {
+        die("SQL Error in Update: " . mysqli_error($conn));
+    }
+}
+
+// Fetch monitor product
+$edit_data = null;
+if (isset($_GET['edit_id'])) {
+    $edit_id = intval($_GET['edit_id']);
+    $edit_result = mysqli_query($conn, "SELECT * FROM monitor WHERE id='$edit_id'");
+    $edit_data = mysqli_fetch_assoc($edit_result);
+}
+
+mysqli_close($conn);
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Edit Monitor</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f5f5f5; padding: 20px; }
+        form { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        label { font-weight: bold; margin-top: 10px; display: block; }
+        input, textarea, select { width: 100%; padding: 10px; margin-top: 5px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; width: 100%; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        img { display: block; margin-top: 10px; max-width: 100px; height: auto; border-radius: 4px; }
+        .error { color: red; text-align: center; }
+    </style>
+</head>
+<body>
+
+<?php if ($edit_data) { ?>
+<h2>Edit Monitor Product</h2>
+<form method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="update_id" value="<?= $edit_data['id']; ?>">
+
+    <label>Offer:</label>
+    <input type="text" name="offer" value="<?= htmlspecialchars($edit_data['offer']); ?>">
+
+    <label>Product Name:</label>
+    <input type="text" name="name" value="<?= htmlspecialchars($edit_data['name']); ?>" required>
+
+    <label>Description:</label>
+    <textarea name="description" required><?= htmlspecialchars($edit_data['description']); ?></textarea>
+
+    <label>Monitor:</label>
+    <select name="monitor_dropdown" required>
+        <option value="">Select Monitor</option>
+        <?php mysqli_data_seek($monitor_result, 0); while ($row = mysqli_fetch_assoc($monitor_result)) {
+            $val = $row['monitor'];
+            $selected = ($edit_data['lcdmonitor'] == $val) ? 'selected' : '';
+            echo "<option value='$val' $selected>$val</option>";
+        } ?>
+    </select>
+
+    <label>Size (Inches):</label>
+    <select name="size_dropdown" required>
+        <option value="">Select Size</option>
+        <?php mysqli_data_seek($size_result, 0); while ($row = mysqli_fetch_assoc($size_result)) {
+            $val = $row['size'];
+            $selected = ($edit_data['inches'] == $val) ? 'selected' : '';
+            echo "<option value='$val' $selected>$val</option>";
+        } ?>
+    </select>
+
+    <label>Review (Rating):</label>
+    <input type="number" name="rating" min="1" max="5" value="<?= htmlspecialchars($edit_data['review']); ?>" required>
+
+    <label>Product Code:</label>
+    <input type="text" name="code" value="<?= htmlspecialchars($edit_data['code']); ?>" required>
+
+    <label>Product Image:</label>
+    <input type="file" name="image">
+    <input type="hidden" name="existing_image" value="<?= htmlspecialchars($edit_data['image']); ?>">
+    <img src="images/<?= htmlspecialchars($edit_data['image']); ?>" alt="Product Image">
+
+    <label>Specification 1:</label>
+    <input type="text" name="spec1" value="<?= htmlspecialchars($edit_data['spec1']); ?>" required>
+
+    <label>Specification 2:</label>
+    <input type="text" name="spec2" value="<?= htmlspecialchars($edit_data['spec2']); ?>" required>
+
+    <label>Specification 3:</label>
+    <input type="text" name="spec3" value="<?= htmlspecialchars($edit_data['spec3']); ?>">
+
+    <label>Specification 4:</label>
+    <input type="text" name="spec4" value="<?= htmlspecialchars($edit_data['spec4']); ?>">
+
+    <label>Price:</label>
+    <input type="number" name="price" value="<?= htmlspecialchars($edit_data['price']); ?>" required>
+
+    <label>Old Price:</label>
+    <input type="number" name="old_price" value="<?= htmlspecialchars($edit_data['old_price']); ?>">
+
+    <button type="submit" name="update_product">Update</button>
+</form>
+<?php } else { ?>
+    <p class="error">Product not found.</p>
+<?php } ?>
+
+</body>
+</html>
